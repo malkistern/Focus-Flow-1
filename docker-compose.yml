@@ -1,0 +1,72 @@
+services:
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # VITE_API_URL is embedded at build time by Vite.
+        # Use http://localhost:8000 so browser requests from the user's machine
+        # reach the backend container whose port 8000 is published on the host.
+        VITE_API_URL: http://localhost:8000
+    container_name: focusflow-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - focusflow-network
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: focusflow-backend
+    ports:
+      - "8000:8000"
+    environment:
+      - MONGODB_URL=mongodb://mongodb:27017/focusflow
+      - JWT_SECRET=${JWT_SECRET:-focusflow_super_secret_jwt_key_min_32_characters_long}
+      - JWT_ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=1440
+      - CORS_ORIGINS=http://localhost:3000,http://127.0.0.1:3000
+      - ATTENTION_SIMULATION_MODE=true
+      - ONNX_MODEL_PATH=./models/attention_model.onnx
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    networks:
+      - focusflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health').read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  mongodb:
+    image: mongo:6-jammy
+    container_name: focusflow-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - focusflow-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  mongo_data:
+    driver: local
+
+networks:
+  focusflow-network:
+    driver: bridge
